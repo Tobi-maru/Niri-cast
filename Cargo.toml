@@ -1,0 +1,15 @@
+[package]
+name = "niri-cast"
+version = "0.1.0"
+edition = "2021"
+description = "Unified TUI control app for niri screencast + HDMI monitor/audio workflows"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+crossterm = "0.28"
+dirs = "5.0"
+ratatui = "0.29"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }

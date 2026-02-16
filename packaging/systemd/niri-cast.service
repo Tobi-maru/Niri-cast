@@ -1,0 +1,11 @@
+[Unit]
+Description=niri-cast TUI helper
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/niri-cast
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
