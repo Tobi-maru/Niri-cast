@@ -19,7 +19,7 @@ impl CastPreflight {
 pub fn preflight(system: &SystemAdapter, portal: &PortalAdapter) -> CastPreflight {
     let mut missing = Vec::new();
 
-    for cmd in ["niri", "wpctl"] {
+    for cmd in ["niri", "wpctl", "wl-mirror"] {
         if !system.command_exists(cmd) {
             missing.push(format!("missing command: {cmd}"));
         }

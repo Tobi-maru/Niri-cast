@@ -60,7 +60,9 @@ pub fn render(frame: &mut Frame, app: &App) {
         Span::styled("c/e/w/v/h/u", Style::default().fg(Color::Yellow)),
         Span::raw(" preflight/extendR/extendL/mirror/hdmi-only/restore  "),
         Span::styled("m/a/s/l", Style::default().fg(Color::Yellow)),
-        Span::raw(" outputs/audio/save/load"),
+        Span::raw(" outputs/hdmi-audio/save/load  "),
+        Span::styled("j/k/Enter/t/p", Style::default().fg(Color::Yellow)),
+        Span::raw(" audio-select/apply/tv/laptop"),
     ])]);
     frame.render_widget(footer, chunks[3]);
 }

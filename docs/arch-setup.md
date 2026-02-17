@@ -3,7 +3,7 @@
 Install required packages:
 
 ```bash
-sudo pacman -S --needed niri pipewire wireplumber xdg-desktop-portal xdg-desktop-portal-gnome
+sudo pacman -S --needed niri pipewire wireplumber xdg-desktop-portal xdg-desktop-portal-gnome wl-mirror
 ```
 
 Ensure user services are active:

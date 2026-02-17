@@ -38,6 +38,10 @@ cargo run
 - `u`: restore all connected outputs (turn on + auto position)
 - `m`: list HDMI outputs
 - `a`: switch to first HDMI sink
+- `j` / `k`: select next/previous audio output channel
+- `Enter`: apply selected audio channel as default
+- `t`: quick switch to TV/HDMI audio (with card-profile fallback)
+- `p`: quick switch to laptop/non-HDMI audio (with card-profile fallback)
 - `s`: save profile (`default-tv`)
 - `l`: load profile (`default-tv`)
 
@@ -49,5 +53,6 @@ cargo run
 - `xdg-desktop-portal`
 - `xdg-desktop-portal-gnome`
 - `wpctl` (from PipeWire stack)
+- `wl-mirror`
 
 See [docs/arch-setup.md](docs/arch-setup.md).

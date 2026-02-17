@@ -18,7 +18,7 @@ fn cast_view(app: &App) -> Text<'static> {
         Line::from("Press 'c' to run cast preflight checks."),
         Line::from("Press 'e' for extend-right mode."),
         Line::from("Press 'w' for extend-left mode."),
-        Line::from("Press 'v' for mirror mode (align HDMI to laptop position)."),
+        Line::from("Press 'v' for mirror mode (wl-mirror fullscreen on HDMI)."),
         Line::from("Press 'h' for HDMI-only mode."),
         Line::from("Press 'u' to restore all connected outputs (turn on + auto position)."),
         Line::from(""),
@@ -54,14 +54,24 @@ fn monitors_view(app: &App) -> Text<'static> {
 fn audio_view(app: &App) -> Text<'static> {
     let mut lines = vec![
         Line::from("Audio control via `wpctl` wrappers."),
-        Line::from("Press 'a' to switch to first HDMI sink."),
+        Line::from("Press 'a' to switch to first HDMI sink (TV quick switch)."),
+        Line::from("Press 't' for TV audio, 'p' for laptop audio quick switch."),
+        Line::from("Use 'j'/'k' to select a sink, Enter to apply selected sink."),
         Line::from(""),
-        Line::from("Discovered sinks:"),
+        Line::from("Discovered audio output channels:"),
     ];
-    if app.last_sinks.is_empty() {
+    if app.audio_sinks.is_empty() {
         lines.push(Line::from("- none"));
     } else {
-        lines.extend(app.last_sinks.iter().map(|x| Line::from(format!("- {x}"))));
+        for (idx, sink) in app.audio_sinks.iter().enumerate() {
+            let cursor = if idx == app.selected_audio_sink { ">" } else { " " };
+            let default = if sink.is_default { "*" } else { " " };
+            let hdmi = if sink.is_hdmi { "TV/HDMI" } else { "Laptop/Analog" };
+            lines.push(Line::from(format!(
+                "{cursor} [{default}] {}. {} ({hdmi})",
+                sink.id, sink.name
+            )));
+        }
     }
     Text::from(lines)
 }

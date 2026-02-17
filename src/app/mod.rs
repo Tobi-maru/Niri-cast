@@ -9,7 +9,13 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use crate::adapters::{audio::AudioAdapter, niri::NiriAdapter, portal::PortalAdapter, system::SystemAdapter};
+use crate::adapters::{
+    audio::{AudioAdapter, AudioSink},
+    niri::NiriAdapter,
+    portal::PortalAdapter,
+    system::SystemAdapter,
+    wl_mirror::WlMirrorAdapter,
+};
 use crate::diagnostics::{run_troubleshooting, TroubleshootReport};
 use crate::profiles::{ProfileStore, TvProfile};
 use crate::ui;
@@ -19,13 +25,15 @@ pub struct App {
     pub running: bool,
     pub log_lines: Vec<String>,
     pub last_outputs: Vec<String>,
-    pub last_sinks: Vec<String>,
+    pub audio_sinks: Vec<AudioSink>,
+    pub selected_audio_sink: usize,
     pub diagnostics: Option<TroubleshootReport>,
     pub profile_store: ProfileStore,
     pub niri: NiriAdapter,
     pub audio: AudioAdapter,
     pub system: SystemAdapter,
     pub portal: PortalAdapter,
+    pub wl_mirror: WlMirrorAdapter,
 }
 
 impl App {
@@ -35,14 +43,22 @@ impl App {
             running: true,
             log_lines: vec!["niri-cast started".to_string()],
             last_outputs: Vec::new(),
-            last_sinks: Vec::new(),
+            audio_sinks: Vec::new(),
+            selected_audio_sink: 0,
             diagnostics: None,
             profile_store: ProfileStore::new()?,
             niri: NiriAdapter::default(),
             audio: AudioAdapter::default(),
             system: SystemAdapter::default(),
             portal: PortalAdapter::default(),
+            wl_mirror: WlMirrorAdapter::default(),
         })
+    }
+
+    pub fn shutdown(&mut self) {
+        if let Err(err) = self.wl_mirror.stop() {
+            self.log(format!("failed to stop wl-mirror: {err}"));
+        }
     }
 
     pub fn log(&mut self, line: impl Into<String>) {
@@ -65,13 +81,26 @@ impl App {
     }
 
     pub fn refresh_discovery(&mut self) {
-        self.last_outputs = self.niri.list_outputs().unwrap_or_default();
-        self.last_sinks = self.audio.list_sinks().unwrap_or_default();
+        self.refresh_outputs();
+        self.refresh_audio_sinks();
         self.log(format!(
             "discovered {} outputs, {} sinks",
             self.last_outputs.len(),
-            self.last_sinks.len()
+            self.audio_sinks.len()
         ));
+    }
+
+    fn refresh_outputs(&mut self) {
+        self.last_outputs = self.niri.list_outputs().unwrap_or_default();
+    }
+
+    fn refresh_audio_sinks(&mut self) {
+        self.audio_sinks = self.audio.list_sink_objects().unwrap_or_default();
+        if self.audio_sinks.is_empty() {
+            self.selected_audio_sink = 0;
+        } else if self.selected_audio_sink >= self.audio_sinks.len() {
+            self.selected_audio_sink = self.audio_sinks.len() - 1;
+        }
     }
 
     pub fn run_diagnostics(&mut self) {
@@ -90,6 +119,140 @@ impl App {
             Ok(Some(sink)) => self.log(format!("set default audio sink: {sink}")),
             Ok(None) => self.log("no HDMI sink found"),
             Err(err) => self.log(format!("audio switch failed: {err}")),
+        }
+        self.refresh_audio_sinks();
+    }
+
+    pub fn select_next_audio_sink(&mut self) {
+        if self.audio_sinks.is_empty() {
+            self.log("no audio sinks discovered");
+            return;
+        }
+        self.selected_audio_sink = (self.selected_audio_sink + 1) % self.audio_sinks.len();
+        let sink = &self.audio_sinks[self.selected_audio_sink];
+        self.log(format!("selected sink: {}. {}", sink.id, sink.name));
+    }
+
+    pub fn select_prev_audio_sink(&mut self) {
+        if self.audio_sinks.is_empty() {
+            self.log("no audio sinks discovered");
+            return;
+        }
+        if self.selected_audio_sink == 0 {
+            self.selected_audio_sink = self.audio_sinks.len() - 1;
+        } else {
+            self.selected_audio_sink -= 1;
+        }
+        let sink = &self.audio_sinks[self.selected_audio_sink];
+        self.log(format!("selected sink: {}. {}", sink.id, sink.name));
+    }
+
+    pub fn apply_selected_audio_sink(&mut self) {
+        if self.audio_sinks.is_empty() {
+            self.log("no audio sinks available to apply");
+            return;
+        }
+
+        let sink = self.audio_sinks[self.selected_audio_sink].clone();
+        match self.audio.set_default_and_move_streams_by_id(&sink.id) {
+            Ok(moved) => self.log(format!(
+                "set default audio sink: {}. {} (moved {} active stream(s))",
+                sink.id, sink.name, moved
+            )),
+            Err(err) => self.log(format!("failed to switch audio sink: {err}")),
+        }
+        self.refresh_audio_sinks();
+    }
+
+    pub fn switch_to_laptop_audio(&mut self) {
+        self.refresh_audio_sinks();
+        let target = self
+            .audio_sinks
+            .iter()
+            .find(|sink| !sink.is_hdmi)
+            .cloned();
+        match target {
+            Some(sink) => {
+                match self.audio.set_default_and_move_streams_by_id(&sink.id) {
+                    Ok(moved) => self.log(format!(
+                        "switched to laptop audio: {} (moved {} active stream(s))",
+                        sink.name, moved
+                    )),
+                    Err(err) => self.log(format!("failed to switch to laptop audio: {err}")),
+                }
+                self.refresh_audio_sinks();
+            }
+            None => {
+                match self.audio.try_switch_card_profile_to_laptop() {
+                    Ok(true) => {
+                        self.refresh_audio_sinks();
+                        if let Some(sink) = self
+                            .audio_sinks
+                            .iter()
+                            .find(|sink| !sink.is_hdmi)
+                            .cloned()
+                        {
+                            match self.audio.set_default_and_move_streams_by_id(&sink.id) {
+                                Ok(moved) => self.log(format!(
+                                    "switched to laptop audio: {} (moved {} active stream(s))",
+                                    sink.name, moved
+                                )),
+                                Err(err) => {
+                                    self.log(format!("failed to set laptop audio sink: {err}"))
+                                }
+                            }
+                            self.refresh_audio_sinks();
+                        } else {
+                            self.log("switched profile, but no laptop sink was exposed");
+                        }
+                    }
+                    Ok(false) => self.log(
+                        "no non-HDMI sink available; could not switch card profile to laptop audio",
+                    ),
+                    Err(err) => self.log(format!("laptop profile switch failed: {err}")),
+                }
+            }
+        }
+    }
+
+    pub fn switch_to_tv_audio(&mut self) {
+        self.refresh_audio_sinks();
+        let target = self.audio_sinks.iter().find(|sink| sink.is_hdmi).cloned();
+        match target {
+            Some(sink) => {
+                match self.audio.set_default_and_move_streams_by_id(&sink.id) {
+                    Ok(moved) => self.log(format!(
+                        "switched to TV audio: {} (moved {} active stream(s))",
+                        sink.name, moved
+                    )),
+                    Err(err) => self.log(format!("failed to switch to TV audio: {err}")),
+                }
+                self.refresh_audio_sinks();
+            }
+            None => {
+                match self.audio.try_switch_card_profile_to_tv() {
+                    Ok(true) => {
+                        self.refresh_audio_sinks();
+                        if let Some(sink) = self.audio_sinks.iter().find(|sink| sink.is_hdmi).cloned()
+                        {
+                            match self.audio.set_default_and_move_streams_by_id(&sink.id) {
+                                Ok(moved) => self.log(format!(
+                                    "switched to TV audio: {} (moved {} active stream(s))",
+                                    sink.name, moved
+                                )),
+                                Err(err) => self.log(format!("failed to set TV audio sink: {err}")),
+                            }
+                            self.refresh_audio_sinks();
+                        } else {
+                            self.log("switched profile, but no HDMI sink was exposed");
+                        }
+                    }
+                    Ok(false) => {
+                        self.log("no HDMI sink available; could not switch card profile to TV audio")
+                    }
+                    Err(err) => self.log(format!("TV profile switch failed: {err}")),
+                }
+            }
         }
     }
 
@@ -176,6 +339,10 @@ impl App {
     }
 
     fn apply_layout_cast(&mut self, mode: LayoutCastMode) -> anyhow::Result<String> {
+        if !matches!(mode, LayoutCastMode::Mirror) {
+            self.wl_mirror.stop()?;
+        }
+
         let mut outputs = self.niri.outputs_json()?;
         let hdmi_name = outputs
             .iter()
@@ -202,13 +369,13 @@ impl App {
             .find(|o| o.name == hdmi_name)
             .ok_or_else(|| anyhow::anyhow!("could not read HDMI output logical info"))?;
 
-        let primary = outputs
+        let non_hdmi_primary = outputs
             .iter()
-            .find(|o| !o.name.to_ascii_uppercase().contains("HDMI"))
-            .unwrap_or(hdmi_output);
+            .find(|o| !o.name.to_ascii_uppercase().contains("HDMI"));
 
         match mode {
             LayoutCastMode::ExtendRight => {
+                let primary = non_hdmi_primary.unwrap_or(hdmi_output);
                 self.niri.set_position(
                     &hdmi_output.name,
                     primary.logical.x + primary.logical.width,
@@ -223,6 +390,7 @@ impl App {
                 ))
             }
             LayoutCastMode::ExtendLeft => {
+                let primary = non_hdmi_primary.unwrap_or(hdmi_output);
                 self.niri.set_position(
                     &hdmi_output.name,
                     primary.logical.x - hdmi_output.logical.width,
@@ -237,15 +405,13 @@ impl App {
                 ))
             }
             LayoutCastMode::Mirror => {
-                self.niri
-                    .set_position(&hdmi_output.name, primary.logical.x, primary.logical.y)?;
-                if primary.name != hdmi_output.name {
-                    self.niri.set_position_auto(&primary.name)?;
-                    self.niri.output_on(&primary.name)?;
-                }
+                let primary = non_hdmi_primary
+                    .ok_or_else(|| anyhow::anyhow!("no non-HDMI source output available"))?;
+                self.niri.output_on(&primary.name)?;
+                self.wl_mirror.start(&primary.name, &hdmi_output.name)?;
                 Ok(format!(
-                    "cast mode set: mirror ({} mirrored with {})",
-                    hdmi_output.name, primary.name
+                    "cast mode set: wl-mirror (source={}, target={})",
+                    primary.name, hdmi_output.name
                 ))
             }
             LayoutCastMode::HdmiOnly => {
@@ -297,6 +463,7 @@ pub fn run() -> anyhow::Result<()> {
     app.refresh_discovery();
 
     let result = run_event_loop(&mut terminal, &mut app);
+    app.shutdown();
 
     disable_raw_mode().ok();
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
@@ -312,7 +479,7 @@ fn run_event_loop(
     while app.running {
         terminal.draw(|frame| ui::render(frame, app))?;
 
-        if event::poll(Duration::from_millis(150))? {
+        if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key_event) = event::read()? {
                 ui::handle_key(app, key_event);
             }

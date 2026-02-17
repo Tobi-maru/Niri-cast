@@ -4,7 +4,7 @@ use crate::diagnostics::{DiagnosticItem, Severity, TroubleshootReport};
 pub fn run_troubleshooting(system: &SystemAdapter, portal: &PortalAdapter) -> TroubleshootReport {
     let mut items = Vec::new();
 
-    for cmd in ["niri", "wpctl"] {
+    for cmd in ["niri", "wpctl", "wl-mirror"] {
         let ok = system.command_exists(cmd);
         items.push(DiagnosticItem {
             title: format!("Command: {cmd}"),
